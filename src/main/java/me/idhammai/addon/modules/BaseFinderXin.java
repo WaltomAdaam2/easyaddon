@@ -254,8 +254,10 @@ public class BaseFinderXin extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.player == null)
+        if (mc.player == null || mc.world == null) {
+            toggle();
             return;
+        }
 
         // 检查是否从上次开始,加载参数
         if (lastBegin.get()) {
@@ -394,6 +396,11 @@ public class BaseFinderXin extends Module {
 
         int steps = Math.max(Math.abs(deltaX), Math.abs(deltaZ));
 
+        if (steps == 0) {
+            currentPathChunks.add(from);
+            return;
+        }
+
         for (int i = 0; i <= steps; i++) {
             int x = from.x + (deltaX * i) / steps;
             int z = from.z + (deltaZ * i) / steps;
@@ -405,6 +412,12 @@ public class BaseFinderXin extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null) {
             setForwardForced(false);
+            return;
+        }
+
+        if (originChunk == null || currentPath == null) {
+            setForwardForced(false);
+            toggle();
             return;
         }
 
@@ -479,7 +492,7 @@ public class BaseFinderXin extends Module {
             return;
         }
 
-        Vec3d playerPos = mc.player.getPos();
+        Vec3d playerPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
         Vec3d targetPos = new Vec3d(targetChunk.getStartX() + 8, mc.player.getY(), targetChunk.getStartZ() + 8);
 
         double deltaX = targetPos.x - playerPos.x;
@@ -495,7 +508,7 @@ public class BaseFinderXin extends Module {
         mc.player.setYaw(targetYaw);
 
         if (waitChunkLoad.get()) {
-            Direction playerDirection = Direction.fromRotation(targetYaw);
+            Direction playerDirection = Direction.fromHorizontalDegrees(targetYaw);
             if (!AdjacentChunksLoaded(playerDirection)) {
                 setForwardForced(false);
                 return;
@@ -528,7 +541,7 @@ public class BaseFinderXin extends Module {
         info("currentPath（圈进度）: " + currentPath);
 
         // 保存进度信息
-        if (originChunk != null && mc.player != null) {
+        if (originChunk != null && currentPath != null && mc.player != null) {
             lastOriginX.set(originChunk.x);
             lastOriginZ.set(originChunk.z);
             lastChunkX.set(mc.player.getChunkPos().x);
@@ -571,6 +584,8 @@ public class BaseFinderXin extends Module {
                     adjacentChunk = new ChunkPos(currentChunk.x + i, currentChunk.z);
                 case EAST, WEST -> adjacentChunk = new ChunkPos(currentChunk.x, currentChunk.z + i);
             }
+            if (adjacentChunk == null) continue;
+
             if (!mc.world.getChunkManager().isChunkLoaded(adjacentChunk.x, adjacentChunk.z)) {
                 return false;
             }
@@ -581,7 +596,7 @@ public class BaseFinderXin extends Module {
 
     @EventHandler
     private void onRender(Render3DEvent event) {
-        if (mc.player == null)
+        if (mc.player == null || mc.world == null)
             return;
 
         BlockPos playerPos = new BlockPos(mc.player.getBlockX(), renderHeight.get(), mc.player.getBlockZ());

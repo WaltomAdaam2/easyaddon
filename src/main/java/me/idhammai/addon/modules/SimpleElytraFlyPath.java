@@ -15,10 +15,10 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.MovementType;
 import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.item.ElytraItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
+import net.minecraft.text.Text;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Vec3d;
 
@@ -135,7 +135,7 @@ public class SimpleElytraFlyPath extends Module {
         if (!mc.player.isCreative()) mc.player.getAbilities().allowFlying = false;
         mc.player.getAbilities().flying = false;
 
-        if (autoTakeoff.get() && !mc.player.isFallFlying()) {
+        if (autoTakeoff.get() && !mc.player.isGliding()) {
             recastElytra(mc.player);
         }
 
@@ -165,10 +165,10 @@ public class SimpleElytraFlyPath extends Module {
      */
     @EventHandler
     public void onPlayerMove(MoveEvent event) {
-        if (mc.player == null) return;
+        if (mc.player == null || mc.world == null) return;
 
         // 如果玩家正在鞘翅飞行
-        if (mc.player.isFallFlying()) {
+        if (mc.player.isGliding()) {
             // 计算玩家当前所在的区块坐标
             // Minecraft中每个区块是16x16格，所以除以16得到区块坐标
             int chunkX = (int) ((mc.player.getX()) / 16);
@@ -192,15 +192,16 @@ public class SimpleElytraFlyPath extends Module {
     @EventHandler
     public void onTick(TickEvent.Pre event) {
         // 基础检查：玩家存在且处于导航模式
-        if (mc.player == null) return;
+        if (mc.player == null || mc.world == null) return;
 
         // 自动起飞逻辑
-        if (autoTakeoff.get() && !mc.player.isFallFlying()) {
+        if (autoTakeoff.get() && !mc.player.isGliding()) {
             recastElytra(mc.player);
         }
 
         if (isArrive && autoQuitServer.get()) {
-            mc.world.disconnect();
+            mc.world.disconnect(Text.literal("Auto quit after arriving at target"));
+            isArrive = false;
         }
     }
 
@@ -212,7 +213,7 @@ public class SimpleElytraFlyPath extends Module {
     @EventHandler
     public void onMove(TravelEvent event) {
         // 基础安全检查
-        if (mc.player == null || mc.world == null || !mc.player.isFallFlying() || !checkElytra() || event.isPost()) {
+        if (mc.player == null || mc.world == null || !mc.player.isGliding() || !checkElytra() || event.isPost()) {
             return;
         }
 
@@ -220,7 +221,7 @@ public class SimpleElytraFlyPath extends Module {
         target = new BlockPos(globalX.get(), 0, globalZ.get());
 
         // 玩家坐标
-        Vec3d playerPos = mc.player.getPos();
+        Vec3d playerPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
         // 目标方块坐标 - 修改这里
         Vec3d targetPos = target.toCenterPos();
         // 计算玩家到目标方块的距离差
@@ -263,12 +264,7 @@ public class SimpleElytraFlyPath extends Module {
      */
     private boolean checkElytra() {
         // 检测玩家是否装备了鞘翅并且可用
-        for (ItemStack is : mc.player.getArmorItems()) {
-            if (is.getItem() instanceof ElytraItem && ElytraItem.isUsable(is)) {
-                return true;
-            }
-        }
-        return false;
+        return isUsableElytra(mc.player.getEquippedStack(EquipmentSlot.CHEST));
     }
 
     /**
@@ -322,7 +318,7 @@ public class SimpleElytraFlyPath extends Module {
             !player.hasVehicle() &&                 // 不在载具中
             !player.isClimbing() &&                 // 不在攀爬
             itemStack.isOf(Items.ELYTRA) &&         // 装备了鞘翅
-            ElytraItem.isUsable(itemStack));        // 鞘翅可用（有耐久度）
+            isUsableElytra(itemStack));        // 鞘翅可用（有耐久度）
     }
 
     /**
@@ -332,8 +328,8 @@ public class SimpleElytraFlyPath extends Module {
     private static boolean ignoreGround(ClientPlayerEntity player) {
         if (!player.isTouchingWater() && !player.hasStatusEffect(StatusEffects.LEVITATION)) {
             ItemStack itemStack = player.getEquippedStack(EquipmentSlot.CHEST);
-            if (itemStack.isOf(Items.ELYTRA) && ElytraItem.isUsable(itemStack)) {
-                player.startFallFlying(); // 开始鞘翅飞行
+            if (isUsableElytra(itemStack)) {
+                player.startGliding(); // 开始鞘翅飞行
                 return true;
             }
         }
@@ -348,6 +344,10 @@ public class SimpleElytraFlyPath extends Module {
      */
     private double getX() {
         return mc.player.getVelocity().x;
+    }
+
+    private static boolean isUsableElytra(ItemStack stack) {
+        return stack.isOf(Items.ELYTRA) && stack.getDamage() < stack.getMaxDamage() - 1;
     }
 
     /**

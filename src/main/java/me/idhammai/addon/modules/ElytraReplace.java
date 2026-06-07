@@ -104,7 +104,7 @@ public class ElytraReplace extends Module {
      */
     private void checkAndReplaceElytra(ItemStack chestStack, int remainingDurability) {
         // 检查是否只在飞行时替换
-        if (onlyWhenFlying.get() && !mc.player.isFallFlying()) return;
+        if (onlyWhenFlying.get() && !mc.player.isGliding()) return;
 
         // 检查鞘翅是否需要替换
         if (remainingDurability > replaceDurability.get()) return;

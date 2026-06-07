@@ -15,6 +15,7 @@ import meteordevelopment.meteorclient.utils.player.Rotations;
 import meteordevelopment.meteorclient.utils.world.BlockUtils;
 import meteordevelopment.orbit.EventHandler;
 import net.minecraft.client.MinecraftClient;
+import net.minecraft.client.gui.screen.ingame.HandledScreen;
 import net.minecraft.component.DataComponentTypes;
 import net.minecraft.component.type.ContainerComponent;
 import net.minecraft.item.Items;
@@ -22,12 +23,12 @@ import net.minecraft.item.BlockItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.block.BlockState;
 import net.minecraft.block.ShulkerBoxBlock;
+import net.minecraft.screen.slot.SlotActionType;
 import net.minecraft.util.Hand;
 import net.minecraft.util.hit.BlockHitResult;
 import net.minecraft.util.math.BlockPos;
 import net.minecraft.util.math.Direction;
 import net.minecraft.util.math.Vec3d;
-import net.minecraft.network.packet.c2s.play.PlayerInteractBlockC2SPacket;
 
 public class NetherElytraPath extends Module {
     private static final MinecraftClient mc = MinecraftClient.getInstance();
@@ -63,11 +64,16 @@ public class NetherElytraPath extends Module {
 
     @Override
     public void onActivate() {
-        if (mc.player == null)
+        if (mc.player == null || mc.world == null) {
+            ChatUtils.error("请先进入世界再启用 NetherElytraPath。");
+            toggle();
             return;
+        }
 
         currentProgress = Progress.Pathing;
         resetReplenishState();
+        shouldLandForElytra = false;
+        shouldLandForFirework = false;
 
         // 设置Baritone API参数（xin服最佳参数）
         Settings settings = BaritoneAPI.getSettings();
@@ -97,6 +103,12 @@ public class NetherElytraPath extends Module {
     private void onTick(TickEvent.Pre event) {
         if (mc.player == null || mc.world == null)
             return;
+
+        if (currentProgress == null) {
+            ChatUtils.error("NetherElytraPath 状态异常，已自动关闭以避免崩溃。");
+            toggle();
+            return;
+        }
 
         switch (currentProgress) {
             case Pathing -> handlePathing();
@@ -145,9 +157,9 @@ public class NetherElytraPath extends Module {
         // 检查Baritone是否完成降落
         boolean isPathing = BaritoneAPI.getProvider().getPrimaryBaritone().getPathingBehavior().isPathing();
         boolean isOnGround = mc.player.isOnGround();
-        boolean isFallFlying = mc.player.isFallFlying();
+        boolean isGliding = mc.player.isGliding();
 
-        if (!isPathing && isOnGround && !isFallFlying) {
+        if (!isPathing && isOnGround && !isGliding) {
             currentProgress = Progress.Replenishing;
             replenishProgress = ReplenishProgress.TAKE_SHULKER;
             timer = 0;
@@ -156,6 +168,10 @@ public class NetherElytraPath extends Module {
     }
 
     private void handleReplenishing() {
+        if (replenishProgress == null) {
+            replenishProgress = ReplenishProgress.TAKE_SHULKER;
+        }
+
         // 每个步骤都有延迟，确保动作能够完成
         if (timer > 0) {
             timer--;
@@ -190,10 +206,11 @@ public class NetherElytraPath extends Module {
             }
             case TAKE_FIREWORKS -> {
                 if (takeFireworks()) {
-                    currentProgress = Progress.IDLE;
+                    resumePathing();
                     timer = 10;
-                    ChatUtils.info("已成功拿取烟花，准备下一个...");
+                    ChatUtils.info("已成功拿取烟花，继续前往目标...");
                 } else {
+                    timer = 10;
                     ChatUtils.error("无法拿取烟花！");
                 }
             }
@@ -223,7 +240,7 @@ public class NetherElytraPath extends Module {
 
             // 检查是否全部都是烟花
             if (isShulkerFullOfFireworks(stack)) {
-                InvUtils.move().from(i).toHotbar(mc.player.getInventory().selectedSlot);
+                InvUtils.move().from(i).toHotbar(mc.player.getInventory().getSelectedSlot());
                 return true;
             }
         }
@@ -253,8 +270,8 @@ public class NetherElytraPath extends Module {
         }
 
         mc.player.jump();
-        Vec3d vec = mc.player.getPos().add(mc.player.getVelocity()).add(0, -0.75, 0);
-        Vec3d pos = mc.player.getPos();
+        Vec3d pos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
+        Vec3d vec = pos.add(mc.player.getVelocity()).add(0, -0.75, 0);
         bp.set(pos.x, vec.y, pos.z);
 
         // 放置潜影盒
@@ -317,20 +334,51 @@ public class NetherElytraPath extends Module {
                     false // 不是内部点击
             );
 
-            // 模拟右键单击，使用网络包发送方式打开潜影盒
-            int sequence = mc.player.getInventory().selectedSlot; // 使用玩家当前选择的槽位作为序列
-            mc.player.networkHandler.sendPacket(new PlayerInteractBlockC2SPacket(Hand.MAIN_HAND, hitResult, sequence));
+            if (mc.interactionManager != null) {
+                mc.interactionManager.interactBlock(mc.player, Hand.MAIN_HAND, hitResult);
+            }
         });
 
         return true;
     }
 
     private boolean takeFireworks() {
-        if (mc.player == null || mc.world == null) {
+        if (mc.player == null || mc.world == null || mc.interactionManager == null) {
             return false;
         }
 
-        return true;
+        if (!(mc.currentScreen instanceof HandledScreen<?> screen)) {
+            return false;
+        }
+
+        var handler = screen.getScreenHandler();
+        int playerInventoryStart = Math.max(0, handler.slots.size() - 36);
+        boolean movedAny = false;
+
+        for (int i = 0; i < playerInventoryStart; i++) {
+            var slot = handler.slots.get(i);
+            if (slot.hasStack() && slot.getStack().isOf(Items.FIREWORK_ROCKET)) {
+                mc.interactionManager.clickSlot(handler.syncId, i, 0, SlotActionType.QUICK_MOVE, mc.player);
+                movedAny = true;
+            }
+        }
+
+        if (movedAny) {
+            mc.player.closeHandledScreen();
+        }
+
+        return movedAny;
+    }
+
+    private void resumePathing() {
+        currentProgress = Progress.Pathing;
+        resetReplenishState();
+        shouldLandForElytra = false;
+        shouldLandForFirework = false;
+
+        BaritoneAPI.getProvider().getPrimaryBaritone().getCommandManager()
+                .execute("goal " + targetX.get() + " ~ " + targetZ.get());
+        BaritoneAPI.getProvider().getPrimaryBaritone().getCommandManager().execute("elytra");
     }
 
     // ==================== 枚举定义 ====================

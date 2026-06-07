@@ -95,8 +95,10 @@ public class ChickenNametags extends Module {
 
     @EventHandler
     private void onTick(TickEvent.Post event) {
+        if (mc.player == null || mc.world == null) return;
+
         chickenList.clear();
-        Vec3d cameraPos = mc.gameRenderer.getCamera().getPos();
+        Vec3d cameraPos = new Vec3d(mc.player.getX(), mc.player.getY(), mc.player.getZ());
 
         // 遍历世界中的所有实体，找到鸡
         for (Entity entity : mc.world.getEntities()) {
@@ -202,7 +204,7 @@ public class ChickenNametags extends Module {
     private void drawBg(double x, double y, double width, double height) {
         Renderer2D.COLOR.begin();
         Renderer2D.COLOR.quad(x - 1, y - 1, width + 2, height + 2, background.get());
-        Renderer2D.COLOR.render(null);
+        Renderer2D.COLOR.render();
     }
 
     @Override

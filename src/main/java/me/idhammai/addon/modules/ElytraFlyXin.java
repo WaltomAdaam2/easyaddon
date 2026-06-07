@@ -12,7 +12,6 @@ import net.minecraft.client.network.ClientPlayerEntity;
 import net.minecraft.entity.EquipmentSlot;
 import net.minecraft.entity.MovementType;
 import net.minecraft.entity.effect.StatusEffects;
-import net.minecraft.item.ElytraItem;
 import net.minecraft.item.ItemStack;
 import net.minecraft.item.Items;
 import net.minecraft.network.packet.c2s.play.ClientCommandC2SPacket;
@@ -83,15 +82,13 @@ public class ElytraFlyXin extends Module {
 
     @EventHandler
     public void onTick(TickEvent.Pre event) {
-        // 遍历玩家的装备栏，检查是否有鞘翅
-        for (ItemStack is : mc.player.getArmorItems()) {
-            if (is.getItem() instanceof ElytraItem) {
-                hasElytra = true;
-                break;
-            } else {
-                hasElytra = false;
-            }
+        if (mc.player == null || mc.world == null) {
+            hasElytra = false;
+            return;
         }
+
+        // 检查胸甲栏是否装备了可用鞘翅
+        hasElytra = isUsableElytra(mc.player.getEquippedStack(EquipmentSlot.CHEST));
     }
 
     /**
@@ -157,7 +154,7 @@ public class ElytraFlyXin extends Module {
             !player.hasVehicle() &&              // 没有乘坐载具
             !player.isClimbing() &&              // 没有在攀爬
             itemStack.isOf(Items.ELYTRA) &&      // 装备了鞘翅
-            ElytraItem.isUsable(itemStack));     // 鞘翅可用（有耐久度）
+            isUsableElytra(itemStack));     // 鞘翅可用（有耐久度）
     }
 
     /**
@@ -171,18 +168,20 @@ public class ElytraFlyXin extends Module {
         if (!player.isTouchingWater() && !player.hasStatusEffect(StatusEffects.LEVITATION)) {
             ItemStack itemStack = player.getEquippedStack(EquipmentSlot.CHEST);
             // 验证鞘翅装备和可用性
-            if (itemStack.isOf(Items.ELYTRA) && ElytraItem.isUsable(itemStack)) {
+            if (isUsableElytra(itemStack)) {
                 // 强制开始鞘翅飞行
-                player.startFallFlying();
+                player.startGliding();
                 return true;
             } else return false;
         } else return false;
     }
 
     public static double[] directionSpeedKey(double speed) {
+        if (mc.player == null) return new double[]{0, 0};
+
         float forward = (mc.options.forwardKey.isPressed() ? 1 : 0) + (mc.options.backKey.isPressed() ? -1 : 0);
         float side = (mc.options.leftKey.isPressed() ? 1 : 0) + (mc.options.rightKey.isPressed() ? -1 : 0);
-        float yaw = mc.player.prevYaw + (mc.player.getYaw() - mc.player.prevYaw) * 1.0f;
+        float yaw = mc.player.getYaw();
         if (forward != 0.0f) {
             if (side > 0.0f) {
                 yaw += ((forward > 0.0f) ? -45 : 45);
@@ -205,11 +204,13 @@ public class ElytraFlyXin extends Module {
 
     @EventHandler
     public void onPlayerMove(MoveEvent event) {
+        if (mc.player == null || mc.world == null) return;
+
         // 检查玩家是否装备了鞘翅
-        if (!(mc.player.getEquippedStack(EquipmentSlot.CHEST).getItem() instanceof ElytraItem)) return;
+        if (!mc.player.getEquippedStack(EquipmentSlot.CHEST).isOf(Items.ELYTRA)) return;
 
         // 如果玩家正在鞘翅飞行
-        if (mc.player.isFallFlying()) {
+        if (mc.player.isGliding()) {
             // 计算玩家当前所在的区块坐标
             int chunkX = (int) ((mc.player.getX()) / 16);
             int chunkZ = (int) ((mc.player.getZ()) / 16);
@@ -231,7 +232,7 @@ public class ElytraFlyXin extends Module {
     @EventHandler
     public void onMove(TravelEvent event) {
         // 基础检查：空指针、是否有鞘翅、是否在飞行、是否为后处理事件
-        if (mc.player == null || mc.world == null || !hasElytra || !mc.player.isFallFlying() || event.isPost()) return;
+        if (mc.player == null || mc.world == null || !hasElytra || !mc.player.isGliding() || event.isPost()) return;
 
         // 获取玩家当前的朝向向量（水平方向）
         Vec3d lookVec = getRotationVec(1.0f);
@@ -241,16 +242,16 @@ public class ElytraFlyXin extends Module {
         double motionDist = Math.sqrt(getX() * getX() + getZ() * getZ());
 
         // 处理垂直移动控制
-        if (mc.player.input.sneaking) {
+        if (mc.options.sneakKey.isPressed()) {
             // 潜行时下降，使用配置的下降速度
             setY(-downSpeed.get());
-        } else if (!mc.player.input.jumping) {
+        } else if (!mc.options.jumpKey.isPressed()) {
             // 非跳跃状态时，Y轴速度设为接近0（保持水平飞行）
             setY(-0.00000000003D * 0);
         }
 
         // 处理跳跃时的上升逻辑
-        if (mc.player.input.jumping) {
+        if (mc.options.jumpKey.isPressed()) {
             // 如果有水平移动速度
             if (motionDist > 0 / 10) {
                 // 基于当前移动速度计算上升速度
@@ -276,7 +277,7 @@ public class ElytraFlyXin extends Module {
         }
 
         // 非跳跃状态下的水平移动控制
-        if (!mc.player.input.jumping) {
+        if (!mc.options.jumpKey.isPressed()) {
             // 根据键盘输入和配置的速度设置水平移动
             double[] dir = directionSpeedKey(speed.get());
             setX(dir[0]);
@@ -304,6 +305,10 @@ public class ElytraFlyXin extends Module {
     private double getX() {
         return mc.player.getVelocity().x;
 
+    }
+
+    private static boolean isUsableElytra(ItemStack stack) {
+        return stack.isOf(Items.ELYTRA) && stack.getDamage() < stack.getMaxDamage() - 1;
     }
 
     /**

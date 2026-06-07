@@ -75,10 +75,10 @@ public class AutoLoginXin extends Module {
 
     @EventHandler
     public void onTick(TickEvent.Pre event) {
-        if (mc.player == null)
+        if (mc.player == null || mc.world == null || mc.interactionManager == null)
             return;
 
-        if (login && timer.passedS(afterLoginTime.get())) {
+        if (login && mc.getNetworkHandler() != null && timer.passedS(afterLoginTime.get())) {
             System.out.println("login" + password.get());
             mc.getNetworkHandler().sendChatCommand("login " + password.get());
             login = false;

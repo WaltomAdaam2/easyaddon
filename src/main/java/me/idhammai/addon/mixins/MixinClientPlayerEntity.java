@@ -21,12 +21,16 @@ public abstract class MixinClientPlayerEntity extends AbstractClientPlayerEntity
 		super(world, profile);
 	}
 
-	@Inject(method = "move", at = @At(value = "INVOKE", target = "Lnet/minecraft/client/network/AbstractClientPlayerEntity;move(Lnet/minecraft/entity/MovementType;Lnet/minecraft/util/math/Vec3d;)V"), cancellable = true)
+	@Inject(method = "move", at = @At("HEAD"), cancellable = true)
 	public void onMoveHook(MovementType movementType, Vec3d movement, CallbackInfo ci) {
 		MoveEvent event = new MoveEvent(movement.x, movement.y, movement.z);
 		MeteorClient.EVENT_BUS.post(event);
-		ci.cancel();
-		if (!event.isCancelled()) {
+
+		boolean changed = event.getX() != movement.x || event.getY() != movement.y || event.getZ() != movement.z;
+		if (event.isCancelled()) {
+			ci.cancel();
+		} else if (changed) {
+			ci.cancel();
 			super.move(movementType, new Vec3d(event.getX(), event.getY(), event.getZ()));
 		}
 	}
